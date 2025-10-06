@@ -1,0 +1,384 @@
+<html>
+    <head>
+        <title>Arpeggiator Harp</title>
+        <style>
+            html,body {
+                font-family: Calibri, Arial, Helvetica, sans-serif;
+                background-color: var(--white);
+                overflow: hidden;
+                touch-action: none;
+                margin:0;
+                padding:0;
+                height:100%;
+                user-select: none;
+                -webkit-user-select: none; /* Safari */
+                -ms-user-select: none;     /* IE/Edge */
+            }
+            :root {
+                --blue: #3377cc;
+                --light_grey: #eceded;
+                --grey: #777;
+                --dark_grey: #333;
+                --black: #1a1a18;
+                --white: #fff;
+                --orange: #f95;
+                --green: #9f5;
+            }
+            #fields {
+                height:100vh;
+                display:flex;
+                flex-direction: column-reverse;
+                background:var(--white);
+            }
+            .pluck {
+                border-top:1px solid black;
+                flex:1;
+                transition: filter 0.3s ease;
+                touch-action: manipulation;
+            }
+            .pluck:nth-child(odd) {
+                background-color: var(--light_grey);
+            }
+            #fields:active .pluck:hover {
+                filter: url(#wavy);
+                animation: shakeY 0.5s ease;
+            }
+            @keyframes shakeY {
+                0%   { transform: translateY(0); }
+                25%  { transform: translateY(-10px); }
+                50%  { transform: translateY(10px); }
+                75%  { transform: translateY(-10px); }
+                100% { transform: translateY(0); }
+            }
+            #midimenu {
+                position: fixed;
+                z-index:3;
+                right:5px;
+                top:5px;
+                width: 25%;
+                text-align: right;
+            }
+            #midimenu label {
+                display:inline-block;
+                vertical-align: top;
+                text-align: left;
+            }
+            #midi_status {
+                vertical-align: top;
+                display:inline-block;
+                width:14px;
+                height:14px;
+                background-color: var(--orange);
+                border-radius: 50%;
+                margin-top:2px;
+                box-shadow: 0 0 5px var(--orange);
+                border:1px solid var(--black);
+            }
+            #audioInputSelect {
+                max-width:100px;
+                overflow: hidden;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="midimenu">
+            <label>
+                <select size="1" class="navi" id="midi_input_device">
+                    <option>none</option>
+                </select><br>
+                Input
+            </label>
+            <label>
+                <select size="1" class="navi" id="midi_output_device">
+                    <option>none</option>
+                </select><br>
+                Output
+            </label>
+            <label>
+            <select id="audioInputSelect"></select><br>
+            Audio source
+            </label>
+
+            <span id="midi_status"></span>
+        </div>
+        <div id="fields">
+
+        </div>
+        <script>
+            /**
+             * sound init
+             */
+            const audioSelect = document.getElementById("audioInputSelect");
+            const enableButton = document.getElementById("enable_sounds");
+            let audioCtx;
+
+            // Step 1: Request permission and populate input list
+            async function populateAudioInputs() {
+                try {
+                    await navigator.mediaDevices.getUserMedia({ audio: true }); // triggers permission
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const audioInputs = devices.filter(d => d.kind === "audioinput");
+
+                    audioSelect.innerHTML = ""; // clear previous options
+                    audioInputs.forEach((device, index) => {
+                        const option = document.createElement("option");
+                        option.value = device.deviceId;
+                        option.text = device.label || `Input ${index + 1}`;
+                        audioSelect.appendChild(option);
+                    });
+                } catch (err) {
+                    console.error("Error accessing audio devices:", err);
+                }
+            }
+
+            // Step 2: Route selected input to speakers
+            audioSelect.addEventListener("change", async () => {
+                const selectedDeviceId = audioSelect.value;
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined }
+                    });
+
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log("Browser AudioContext sample rate:", audioCtx.sampleRate);
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    const gainNode = audioCtx.createGain();
+                    gainNode.gain.value = 1.0;
+
+                    source.connect(gainNode).connect(audioCtx.destination);
+
+
+                    console.log("Audio input routed to output.");
+                } catch (err) {
+                    console.error("Failed to route audio input:", err);
+                }
+            });
+
+            // Initialize on page load
+            populateAudioInputs();
+
+            /**
+             * MIDI init
+             */
+            navigator.permissions.query({ name: "midi", sysex: true }).then((result) => {
+                if (result.state === "granted") {
+                    // Access granted.
+                } else if (result.state === "prompt") {
+                    // Using API will prompt for permission
+                }
+                    // Permission was denied by user prompt or permission policy
+            });
+            let midi = null;        // global MIDIAccess object
+            let midi_output=null;   // output device
+            let midi_input=null;    // input device
+            var channel=0;          // active channel
+            let currentNotes = {};// all notes held on the keyboard
+
+            function listInputsAndOutputs(midiAccess) {
+                for (const entry of midiAccess.inputs) {
+                    const input = entry[1];
+                    
+                    /** create options */
+                    document.getElementById("midi_input_device").appendChild(new Option(input.name,input.id));
+                }
+
+                for (const entry of midiAccess.outputs) {
+                    const output = entry[1];
+                    /** create options */
+                    document.getElementById("midi_output_device").appendChild(new Option(output.name,output.id));
+                }
+            }
+            
+            /** create a midi router so people can use an external keyboard to play */
+            function setupInputs() {
+                if(midi_input!=null) {
+                    midi_input.onmidimessage = (msg) => {
+                        if(midi_input.name!="") {
+                            const [status, note, velocity] = msg.data;
+                            const command = status & 0xF0;
+                            const channel = status & 0x0F;
+
+                            // Handle Note On with velocity > 0
+                            if (command === 0x90 && velocity > 0) {
+                                currentNotes[`${channel}:${note}`] = { note, channel, velocity };
+                                // Optional: log current notes
+                                // Sort and log notes by ascending note number
+                                const sortedEntries = Object.entries(currentNotes).sort((a, b) => a[1].note - b[1].note);
+                                const orderedNotes = {};
+                                sortedEntries.forEach(([key, value]) => {
+                                    orderedNotes[key] = value; // key is still `${channel}:${note}`
+                                });
+
+                                // Overwrite the original object
+                                currentNotes = orderedNotes;
+
+                                // Optional: log the sorted notes
+                                console.log("Sorted notes:", currentNotes);
+                            }
+
+                            // Handle Note Off (explicit or Note On with velocity 0)
+                            else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+                                delete currentNotes[`${channel}:${note}`];
+                                // Optional: log current notes
+                                console.log("Currently held notes:", currentNotes);
+                            }
+
+                            // Route all other messages (non-note events) directly to output
+                            else {
+                                midi_output.send(msg.data);
+                            }
+                        }
+                    };
+                }
+            }
+
+            function onMIDISuccess(midiAccess) {
+                document.getElementById("midi_status").style.backgroundColor="var(--green)";
+                document.getElementById("midi_status").style.boxShadow="0 0 5px var(--green);";
+                midi = midiAccess; // store in the global (in real usage, would probably keep in an object instance)
+                listInputsAndOutputs(midi);
+                for (const entry of midiAccess.outputs) {
+                    midi_output = entry[1];
+                }
+                for (const entry of midiAccess.inputs) {
+                    midi_input = entry[1];
+                }
+                setupInputs();
+                /** event handler for midi device selector */
+                document.querySelectorAll("#midi_input_device,#midi_output_device").forEach(cb=>{
+                    cb.addEventListener("click",function(evt){
+                        switch(this.id) {
+                            case "midi_input_device":
+                                midi_input = midiAccess.inputs.get(this.options[this.selectedIndex].value);
+                                setupInputs();
+                                break;
+                            case "midi_output_device":
+                                midi_output = midiAccess.outputs.get(this.options[this.selectedIndex].value);
+                                break;
+                        }
+                    });
+                });
+            }
+
+            function onMIDIFailure(msg) {
+                alert("Y U do dis :-(");
+                console.error(`Failed to get MIDI access - ${msg}`);
+            }
+
+            function triggernote(el,override=false) {
+                
+                if (finger == 1||override==true) {
+                    const stringIndex = parseInt(el.dataset.number);
+                    const noteKeys = Object.keys(currentNotes);
+
+                    if (noteKeys.length === 0) {
+                        console.log("No notes currently held.");
+                        return;
+                    }
+
+                    // Determine base note index and octave shift
+                    const baseIndex = stringIndex % noteKeys.length;
+                    const octaveShift = Math.floor(stringIndex / noteKeys.length) * 12;
+
+                    const key = noteKeys[baseIndex];
+                    const { note, channel, velocity } = currentNotes[key];
+
+                    // Transpose and clamp to MIDI range
+                    const transposedNote = Math.min(127, note + octaveShift);
+                    const statusOn = 0x90 + channel;
+                    const statusOff = 0x80 + channel;
+
+                    // Send Note On
+                    midi_output.send([statusOn, transposedNote, velocity]);
+                    console.log(`String ${stringIndex} triggered note ${transposedNote} on channel ${channel} with velocity ${velocity}`);
+
+                    // Send Note Off after 300 ms
+                    setTimeout(() => {
+                        midi_output.send([statusOff, transposedNote, 0]);
+                        console.log(`Note ${transposedNote} off on channel ${channel}`);
+                    }, 300);
+                }
+            }
+
+            navigator.requestMIDIAccess({sysex:true}).then(onMIDISuccess, onMIDIFailure);
+
+            /**
+             * Create some "strings" and attach eventhandlers to it
+             */
+            var finger=0;
+            var previousnote=0;
+
+            let fields = document.getElementById("fields");
+            let plucks = [];
+            let activePluck = null;
+
+            function createstrings(n) {
+                if (n == null) n = 8;
+
+                for (let i = 0; i < n; i++) {
+                    const div = document.createElement("div");
+                    div.className = "pluck";
+                    div.dataset.number = i;
+
+                    div.addEventListener("mouseover", function (e) {
+                        triggernote(this);
+                    });
+
+                    fields.appendChild(div);
+                }
+
+                plucks = Array.from(document.querySelectorAll(".pluck"));
+
+                fields.addEventListener("touchstart", () => {
+                    activePluck = null;
+                });
+
+                fields.addEventListener("touchmove", (e) => {
+                    const touch = e.touches[0];
+                    let foundPluck = null;
+
+                    for (const pluck of plucks) {
+                        const rect = pluck.getBoundingClientRect();
+                        const inside =
+                            touch.clientX >= rect.left &&
+                            touch.clientX <= rect.right &&
+                            touch.clientY >= rect.top &&
+                            touch.clientY <= rect.bottom;
+
+                        if (inside) {
+                            foundPluck = pluck;
+                            break;
+                        }
+                    }
+
+                    if (foundPluck !== activePluck) {
+                        activePluck = foundPluck;
+                        if (activePluck) {
+                            triggernote(activePluck, true);
+                        }
+                    }
+                });
+
+                fields.addEventListener("touchend", () => {
+                    activePluck = null;
+                });
+            }
+
+            fields.addEventListener('mousedown', function(e) {
+                finger=1;
+            });
+            fields.addEventListener('mouseup', function(e) {
+                finger=0;
+            });
+            /*
+            fields.addEventListener('touchstart', function(e) {
+                finger=1;
+            });
+            fields.addEventListener('touchend', function(e) {
+                finger=0;
+            });
+            */
+            createstrings();
+        </script>
+    </body>
+</html>
