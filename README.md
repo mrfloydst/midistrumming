@@ -9,3 +9,5 @@ Select the MIDI input and output in the top right corner
 If your synth doesn't appear there, reload and try again  
 Play a chord on the keyboard  
 Strum on your smartphone or computer using the mouse  
+
+Video: https://youtube.com/shorts/8xaviylXagY
