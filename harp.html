@@ -340,7 +340,9 @@
 
                             // Route all other messages (non-note events) directly to output
                             else {
-                                midi_output.send(msg.data);
+								if(command!==0xC0||midi_output.name!=midi_input.name) {
+									midi_output.send(msg.data);
+								}
                             }
                         }
                     };
