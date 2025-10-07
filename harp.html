@@ -50,12 +50,15 @@
                 75%  { transform: translateY(-10px); }
                 100% { transform: translateY(0); }
             }
+			.pluck.wobble {
+				animation:shakeY 0.5s ease;
+			}
             #midimenu {
                 position: fixed;
                 z-index:3;
                 right:5px;
                 top:5px;
-                width: 25%;
+                width: 50%;
                 text-align: right;
             }
             #midimenu label {
@@ -78,10 +81,33 @@
                 max-width:100px;
                 overflow: hidden;
             }
+			#fullscreen-btn {
+				width: 20px;
+				height: 20px;
+				background-color: transparent;
+				background-image: url("data:image/svg+xml;base64,PHN2ZyBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMyAzdi4wMDFoNC4wMDFNMyAzSDMuMDF2NC4wMDFNMyAyMSBoNC4wMDFWMjFoLjAwMU0zIDIxSDMuMDF2LTQuMDAxTTIxIDNoLTQuMDAxVjMuMDFIMjFNMjEgM3Y0LjAwMUgyMC45OU0yMSAyMWgtNC4wMDFWMjFoLjAwMU0yMSAyMSB2LTQuMDAxSDIwLjk5IiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=");
+				background-size: contain;
+				background-repeat: no-repeat;
+				background-position: center;
+				border: none;
+				cursor: pointer;
+				overflow:hidden;
+				text-indent:30px;
+			}
+
         </style>
     </head>
     <body>
         <div id="midimenu">
+            <label>
+                <select size="1" class="navi" id="numberstrings">
+                    <option>4</option>
+                    <option>6</option>
+                    <option selected>8</option>
+                    <option>16</option>
+                </select><br>
+                Strings
+            </label>
             <label>
                 <select size="1" class="navi" id="midi_input_device">
                     <option>none</option>
@@ -98,6 +124,9 @@
             <select id="audioInputSelect"></select><br>
             Audio source
             </label>
+			<label>
+			<button id="fullscreen-btn">Fullscreen</button>
+			</label>
 
             <span id="midi_status"></span>
         </div>
@@ -105,6 +134,23 @@
 
         </div>
         <script>
+			document.getElementById("fullscreen-btn").addEventListener("click", () => {
+			  const elem = document.documentElement; // Or any specific element like #fields
+				if (!document.fullscreenElement) {
+			  if (elem.requestFullscreen) {
+				elem.requestFullscreen();
+			  } else if (elem.webkitRequestFullscreen) { // Safari
+				elem.webkitRequestFullscreen();
+			  } else if (elem.msRequestFullscreen) { // IE11
+				elem.msRequestFullscreen();
+			  }
+			  }
+			  else {
+				// Exit fullscreen
+				document.exitFullscreen();
+			  }
+			});
+
             /**
              * sound init
              */
@@ -268,6 +314,10 @@
             function triggernote(el,override=false) {
                 
                 if (finger == 1||override==true) {
+					if(override) {
+						el.classList.add("wobble");
+						setTimeout(() => el.classList.remove("wobble"), 500); // Match animation duration
+					}
                     const stringIndex = parseInt(el.dataset.number);
                     const noteKeys = Object.keys(currentNotes);
 
@@ -287,6 +337,7 @@
                     const transposedNote = Math.min(127, note + octaveShift);
                     const statusOn = 0x90 + channel;
                     const statusOff = 0x80 + channel;
+					
 
                     // Send Note On
                     midi_output.send([statusOn, transposedNote, velocity]);
@@ -312,9 +363,13 @@
             let plucks = [];
             let activePluck = null;
 
+			document.getElementById("numberstrings").addEventListener("change",function(e){
+				createstrings(this.value);
+			});
+
             function createstrings(n) {
                 if (n == null) n = 8;
-
+				fields.innerHTML="";
                 for (let i = 0; i < n; i++) {
                     const div = document.createElement("div");
                     div.className = "pluck";
