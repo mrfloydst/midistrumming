@@ -389,34 +389,43 @@
                 });
 
                 fields.addEventListener("touchmove", (e) => {
-                    const touch = e.touches[0];
-                    let foundPluck = null;
+				  for (let i = 0; i < e.touches.length; i++) {
+					const touch = e.touches[i];
 
-                    for (const pluck of plucks) {
-                        const rect = pluck.getBoundingClientRect();
-                        const inside =
-                            touch.clientX >= rect.left &&
-                            touch.clientX <= rect.right &&
-                            touch.clientY >= rect.top &&
-                            touch.clientY <= rect.bottom;
+					plucks.forEach(pluck => {
+					  const rect = pluck.getBoundingClientRect();
+					  const inside =
+						touch.clientX >= rect.left &&
+						touch.clientX <= rect.right &&
+						touch.clientY >= rect.top &&
+						touch.clientY <= rect.bottom;
 
-                        if (inside) {
-                            foundPluck = pluck;
-                            break;
-                        }
-                    }
+					  // Use touch identifier to track which finger triggered which pluck
+					  const touchId = touch.identifier;
+					  const activeId = pluck.dataset.activeTouch;
 
-                    if (foundPluck !== activePluck) {
-                        activePluck = foundPluck;
-                        if (activePluck) {
-                            triggernote(activePluck, true);
-                        }
-                    }
-                });
+					  if (inside && activeId !== String(touchId)) {
+						pluck.dataset.activeTouch = touchId;
+						triggernote(pluck, true);
+
+						// Wobble animation
+						pluck.classList.add("wobble");
+						setTimeout(() => {
+						  pluck.classList.remove("wobble");
+						  delete pluck.dataset.activeTouch;
+						}, 500);
+					  }
+					});
+				  }
+				});
+
 
                 fields.addEventListener("touchend", () => {
-                    activePluck = null;
-                });
+				  plucks.forEach(pluck => {
+					delete pluck.dataset.activeTouch;
+				  });
+				});
+
             }
 
             fields.addEventListener('mousedown', function(e) {
